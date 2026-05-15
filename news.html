@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NETPULSE | ネットワークエンジニア向けニュース</title>
+  <style>
+    :root {
+      --bg-primary:    #080c18;
+      --bg-secondary:  #0b1020;
+      --bg-card:       #0f1729;
+      --bg-card-hover: #141f35;
+      --border:        #1c2a42;
+      --text-primary:  #e2e8f0;
+      --text-secondary:#94a3b8;
+      --text-muted:    #4b6080;
+      --cyan:    #00d4ff;
+      --green:   #00ff88;
+      --red:     #ff4455;
+      --purple:  #a78bfa;
+      --orange:  #ffb340;
+      --blue:    #4e9eff;
+      --font-mono: 'Courier New', Consolas, monospace;
+      --font-ui:   -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      background-image:
+        radial-gradient(ellipse 60% 50% at 10% 20%, rgba(0,212,255,.04) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 90% 80%, rgba(0,255,136,.03) 0%, transparent 70%);
+    }
+
+    /* ─── Header ─── */
+    header {
+      position: sticky; top: 0; z-index: 200;
+      background: rgba(8,12,24,.92);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
+    .header-row {
+      max-width: 1440px; margin: 0 auto;
+      display: flex; align-items: center; gap: 1rem;
+      padding: .625rem 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* Logo */
+    .logo { display:flex; align-items:center; gap:.5rem; text-decoration:none; flex-shrink:0; }
+    .logo-mark {
+      width:34px; height:34px; border-radius:8px;
+      background: linear-gradient(135deg, var(--cyan) 0%, var(--green) 100%);
+      display:flex; align-items:center; justify-content:center;
+      font-size:1.1rem; line-height:1;
+    }
+    .logo-name {
+      font-family: var(--font-mono); font-size:1rem; font-weight:700;
+      color: var(--text-primary); letter-spacing:.05em;
+    }
+    .logo-name em { color: var(--cyan); font-style:normal; }
+
+    /* Search */
+    .search-wrap { flex:1; min-width:180px; max-width:480px; position:relative; }
+    .search-input {
+      width:100%; background: var(--bg-card);
+      border: 1px solid var(--border); border-radius:7px;
+      padding: .45rem 1rem .45rem 2.2rem;
+      color: var(--text-primary); font-size:.82rem; outline:none;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .search-input::placeholder { color: var(--text-muted); }
+    .search-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(0,212,255,.12);
+    }
+    .search-ico {
+      position:absolute; left:.65rem; top:50%; transform:translateY(-50%);
+      color: var(--text-muted); font-size:.9rem; pointer-events:none;
+    }
+
+    /* Actions */
+    .header-actions { display:flex; align-items:center; gap:.625rem; margin-left:auto; }
+    .pill-info {
+      font-family: var(--font-mono); font-size:.67rem; color: var(--text-muted);
+      white-space:nowrap;
+    }
+    .btn-refresh {
+      display:flex; align-items:center; gap:.35rem;
+      background: rgba(0,212,255,.08); border: 1px solid rgba(0,212,255,.25);
+      color: var(--cyan); padding:.38rem .8rem; border-radius:6px;
+      font-size:.75rem; cursor:pointer; transition: all .2s;
+      font-family: var(--font-mono);
+    }
+    .btn-refresh:hover { background: rgba(0,212,255,.18); border-color: var(--cyan); }
+    .btn-refresh.spinning .ricon { animation: spin .8s linear infinite; }
+
+    /* ─── Ticker ─── */
+    .ticker {
+      background: rgba(0,212,255,.04);
+      border-bottom: 1px solid rgba(0,212,255,.08);
+      padding: .28rem 1.5rem; overflow:hidden;
+    }
+    .ticker-row { max-width:1440px; margin:0 auto; display:flex; align-items:center; gap:.875rem; }
+    .ticker-live {
+      font-family: var(--font-mono); font-size:.6rem; font-weight:700;
+      color: var(--cyan); letter-spacing:.12em; text-transform:uppercase;
+      border: 1px solid rgba(0,212,255,.35); padding:.12rem .4rem; border-radius:3px;
+      flex-shrink:0; animation: pulse-border 2s ease-in-out infinite;
+    }
+    .ticker-scroll { overflow:hidden; flex:1; }
+    .ticker-tape {
+      display:flex; gap:3rem; white-space:nowrap;
+      animation: scroll-tape 60s linear infinite;
+    }
+    .ticker-tape:hover { animation-play-state:paused; }
+    .ticker-item { font-size:.68rem; color: var(--text-secondary); font-family: var(--font-mono); }
+    .ticker-item a { color:inherit; text-decoration:none; }
+    .ticker-item a:hover { color: var(--text-primary); }
+
+    /* ─── Category Nav ─── */
+    .catbar {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem; overflow-x:auto; scrollbar-width:none;
+    }
+    .catbar::-webkit-scrollbar { display:none; }
+    .catbar-row { max-width:1440px; margin:0 auto; display:flex; gap:.25rem; padding:.5rem 0; }
+    .cat-btn {
+      display:flex; align-items:center; gap:.35rem;
+      padding:.32rem .875rem; border-radius:20px;
+      border:1px solid transparent; background:transparent;
+      color: var(--text-secondary); font-size:.77rem; cursor:pointer; white-space:nowrap;
+      transition: all .18s;
+    }
+    .cat-btn:hover { color: var(--text-primary); background: var(--bg-card); }
+    .cat-btn.active { background: var(--cyan); color:#000; font-weight:700; border-color:transparent; }
+    .cat-dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
+
+    /* ─── Main ─── */
+    .main { max-width:1440px; margin:0 auto; padding:1.25rem 1.5rem; }
+
+    /* Stats */
+    .statsbar {
+      display:flex; align-items:center; gap:1.25rem; flex-wrap:wrap;
+      padding:.6rem 1rem; margin-bottom:1.1rem;
+      background: var(--bg-secondary); border:1px solid var(--border); border-radius:8px;
+      font-family: var(--font-mono); font-size:.7rem; color: var(--text-muted);
+    }
+    .stat { display:flex; align-items:center; gap:.35rem; }
+    .sval { color: var(--green); font-weight:700; }
+    .sdiv { color: var(--border); }
+
+    /* Grid */
+    .news-grid {
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap:1rem;
+    }
+
+    /* Card */
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius:12px; padding:1.1rem;
+      cursor:pointer; transition: all .22s;
+      display:flex; flex-direction:column; gap:.7rem;
+      position:relative; overflow:hidden;
+      animation: fade-up .3s ease-out;
+    }
+    .card::before {
+      content:''; position:absolute; top:0; left:0; right:0; height:2px;
+      background: var(--accent, var(--cyan)); opacity:0; transition:opacity .2s;
+    }
+    .card:hover {
+      border-color: var(--accent, var(--cyan));
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(0,0,0,.4), 0 0 0 1px var(--accent, var(--cyan)) inset;
+    }
+    .card:hover::before { opacity:1; }
+
+    /* Card meta row */
+    .cmeta { display:flex; align-items:center; gap:.45rem; flex-wrap:wrap; }
+    .source-tag {
+      display:flex; align-items:center; gap:.3rem;
+      padding:.18rem .55rem; background:rgba(255,255,255,.04);
+      border:1px solid var(--border); border-radius:4px;
+      font-size:.66rem; font-family: var(--font-mono); color: var(--text-muted);
+    }
+    .sdot { width:5px; height:5px; border-radius:50%; background: var(--accent, var(--cyan)); flex-shrink:0; }
+    .cat-tag {
+      padding:.18rem .55rem; border-radius:4px;
+      font-size:.62rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
+    }
+    .tago { margin-left:auto; font-size:.67rem; color: var(--text-muted); font-family: var(--font-mono); white-space:nowrap; }
+
+    .ctitle {
+      font-size:.88rem; font-weight:600; line-height:1.45;
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+    }
+    .cexcerpt {
+      font-size:.78rem; color: var(--text-secondary); line-height:1.55;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+    }
+    .cfooter {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-top:auto; padding-top:.5rem; border-top:1px solid var(--border);
+    }
+    .read-btn {
+      display:flex; align-items:center; gap:.35rem;
+      font-size:.72rem; color: var(--accent, var(--cyan));
+      text-decoration:none; font-family: var(--font-mono); transition: gap .15s;
+    }
+    .read-btn:hover { gap:.6rem; }
+    .bmark-btn {
+      background:none; border:none; color: var(--text-muted);
+      cursor:pointer; font-size:.9rem; padding:.15rem; transition:color .18s;
+    }
+    .bmark-btn:hover, .bmark-btn.on { color: var(--orange); }
+
+    /* Category accent colors */
+    .c-networking { --accent: var(--cyan);   }
+    .c-security   { --accent: var(--red);    }
+    .c-cloud      { --accent: var(--purple); }
+    .c-hardware   { --accent: var(--orange); }
+    .c-sdn        { --accent: var(--green);  }
+    .c-general    { --accent: var(--blue);   }
+
+    .t-networking { background:rgba(0,212,255,.08);  color: var(--cyan);   border:1px solid rgba(0,212,255,.2); }
+    .t-security   { background:rgba(255,68,85,.08);  color: var(--red);    border:1px solid rgba(255,68,85,.2); }
+    .t-cloud      { background:rgba(167,139,250,.08);color: var(--purple); border:1px solid rgba(167,139,250,.2); }
+    .t-hardware   { background:rgba(255,179,64,.08); color: var(--orange); border:1px solid rgba(255,179,64,.2); }
+    .t-sdn        { background:rgba(0,255,136,.08);  color: var(--green);  border:1px solid rgba(0,255,136,.2); }
+    .t-general    { background:rgba(78,158,255,.08); color: var(--blue);   border:1px solid rgba(78,158,255,.2); }
+
+    /* ── Empty / Loading / Error states ── */
+    .state-box {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:.875rem; padding:4rem 2rem; grid-column:1/-1; text-align:center;
+    }
+    .spinner {
+      width:38px; height:38px; border:3px solid var(--border);
+      border-top-color: var(--cyan); border-radius:50%;
+      animation: spin .75s linear infinite;
+    }
+    .state-msg { font-family: var(--font-mono); font-size:.82rem; color: var(--text-muted); }
+    .state-err { color: var(--red); }
+
+    /* ── Animations ── */
+    @keyframes spin { to { transform:rotate(360deg); } }
+    @keyframes fade-up { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse-border {
+      0%,100% { box-shadow: 0 0 0 0 rgba(0,212,255,0); }
+      50%      { box-shadow: 0 0 6px 1px rgba(0,212,255,.4); }
+    }
+    @keyframes scroll-tape { 0% { transform:translateX(0); } 100% { transform:translateX(-50%); } }
+
+    /* ── Responsive ── */
+    @media(max-width:600px){
+      .news-grid { grid-template-columns:1fr; }
+      .pill-info { display:none; }
+      .header-row { gap:.625rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<header>
+  <div class="header-row">
+    <a href="#" class="logo">
+      <div class="logo-mark">⬡</div>
+      <span class="logo-name">NET<em>PULSE</em></span>
+    </a>
+    <div class="search-wrap">
+      <span class="search-ico">⌕</span>
+      <input class="search-input" id="searchInput" type="text" placeholder="ニュースを検索…">
+    </div>
+    <div class="header-actions">
+      <span class="pill-info" id="lastUpdated">──:──</span>
+      <button class="btn-refresh" id="refreshBtn" onclick="loadAll()">
+        <span class="ricon">↻</span><span>更新</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ Ticker ═══ -->
+<div class="ticker">
+  <div class="ticker-row">
+    <span class="ticker-live">LIVE</span>
+    <div class="ticker-scroll">
+      <div class="ticker-tape" id="tickerTape">
+        <span class="ticker-item">ニュースを取得中…</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Category Nav ═══ -->
+<div class="catbar">
+  <div class="catbar-row">
+    <button class="cat-btn active" onclick="setCat('all',this)"><span class="cat-dot"></span>すべて</button>
+    <button class="cat-btn" onclick="setCat('networking',this)" style="--cd:#00d4ff"><span class="cat-dot" style="background:#00d4ff"></span>ネットワーク</button>
+    <button class="cat-btn" onclick="setCat('security',this)"  style="--cd:#ff4455"><span class="cat-dot" style="background:#ff4455"></span>セキュリティ</button>
+    <button class="cat-btn" onclick="setCat('cloud',this)"     style="--cd:#a78bfa"><span class="cat-dot" style="background:#a78bfa"></span>クラウド</button>
+    <button class="cat-btn" onclick="setCat('hardware',this)"  style="--cd:#ffb340"><span class="cat-dot" style="background:#ffb340"></span>ハードウェア</button>
+    <button class="cat-btn" onclick="setCat('sdn',this)"       style="--cd:#00ff88"><span class="cat-dot" style="background:#00ff88"></span>SDN / NFV</button>
+  </div>
+</div>
+
+<!-- ═══ Main ═══ -->
+<main class="main">
+  <div class="statsbar">
+    <span class="stat">記事数 <span class="sval" id="st-total">0</span></span>
+    <span class="sdiv">│</span>
+    <span class="stat">ソース <span class="sval" id="st-src">0</span></span>
+    <span class="sdiv">│</span>
+    <span class="stat">表示中 <span class="sval" id="st-shown">0</span></span>
+    <span class="sdiv">│</span>
+    <span class="stat">更新 <span class="sval" id="st-time">──</span></span>
+  </div>
+
+  <div class="news-grid" id="grid">
+    <div class="state-box">
+      <div class="spinner"></div>
+      <div class="state-msg">ニュースを取得中…</div>
+    </div>
+  </div>
+</main>
+
+<script>
+/* ═══════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════ */
+const PROXY = 'https://api.rss2json.com/v1/api.json?count=15&rss_url=';
+
+const SOURCES = [
+  { name:'Network World',         url:'https://www.networkworld.com/index.rss',                   cat:'networking' },
+  { name:'The Register: Networks',url:'https://www.theregister.com/networks/news/rss',            cat:'networking' },
+  { name:'The Register: Security',url:'https://www.theregister.com/security/news/rss',            cat:'security'   },
+  { name:'Packet Pushers',        url:'https://packetpushers.net/feed/',                          cat:'networking' },
+  { name:'SDxCentral',            url:'https://www.sdxcentral.com/feed/',                         cat:'sdn'        },
+  { name:'Bleeping Computer',     url:'https://www.bleepingcomputer.com/feed/',                   cat:'security'   },
+  { name:'AWS Blog',              url:'https://aws.amazon.com/blogs/aws/feed/',                   cat:'cloud'      },
+  { name:'Hacker News',           url:'https://news.ycombinator.com/rss',                         cat:'general'    },
+];
+
+const KW = {
+  networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','ip ','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall','ネットワーク','ルーティング'],
+  security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack','セキュリティ','脆弱性'],
+  cloud:      ['cloud','aws','azure','gcp','kubernetes','k8s','docker','container','serverless','devops','クラウド'],
+  hardware:   ['hardware','chip','silicon','asic','fpga','processor','router hardware','switch hardware','ハードウェア'],
+  sdn:        ['sdn','nfv','openflow','sd-wan','nsx','network function','virtualization','overlay','intent-based'],
+};
+
+const CAT_LABEL = { networking:'ネットワーク', security:'セキュリティ', cloud:'クラウド', hardware:'ハードウェア', sdn:'SDN/NFV', general:'一般' };
+
+/* ═══════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════ */
+let articles = [];
+let activeCat = 'all';
+let query = '';
+let bookmarks = new Set(JSON.parse(localStorage.getItem('np_bm') || '[]'));
+
+/* ═══════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════ */
+function classify(item, fallback) {
+  const txt = (item.title + ' ' + (item.description || '')).toLowerCase();
+  for (const [cat, kws] of Object.entries(KW)) {
+    if (kws.some(k => txt.includes(k))) return cat;
+  }
+  return fallback;
+}
+
+function ago(d) {
+  const s = (Date.now() - new Date(d)) / 1000;
+  if (s < 60)    return 'たった今';
+  if (s < 3600)  return `${Math.floor(s/60)}分前`;
+  if (s < 86400) return `${Math.floor(s/3600)}時間前`;
+  if (s < 604800)return `${Math.floor(s/86400)}日前`;
+  return new Date(d).toLocaleDateString('ja-JP');
+}
+
+function strip(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return (d.textContent || '').replace(/\s+/g,' ').trim();
+}
+
+/* ═══════════════════════════════════════════
+   FETCH
+═══════════════════════════════════════════ */
+async function fetchSource(src) {
+  const r = await fetch(PROXY + encodeURIComponent(src.url));
+  const d = await r.json();
+  if (d.status !== 'ok') throw new Error(src.name);
+  return d.items.map(it => ({
+    title:      it.title,
+    link:       it.link,
+    desc:       it.description || '',
+    date:       it.pubDate,
+    src:        src.name,
+    cat:        classify(it, src.cat),
+  }));
+}
+
+async function loadAll() {
+  const grid = document.getElementById('grid');
+  const btn  = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  grid.innerHTML = `<div class="state-box"><div class="spinner"></div><div class="state-msg">フィードを取得中 (${SOURCES.length} ソース)…</div></div>`;
+  articles = [];
+
+  const results = await Promise.allSettled(SOURCES.map(fetchSource));
+  let ok = 0;
+  for (const r of results) {
+    if (r.status === 'fulfilled') { articles.push(...r.value); ok++; }
+  }
+
+  articles.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  document.getElementById('st-total').textContent  = articles.length;
+  document.getElementById('st-src').textContent    = ok;
+  document.getElementById('st-time').textContent   = ts;
+  document.getElementById('lastUpdated').textContent = `最終更新 ${ts}`;
+
+  btn.classList.remove('spinning');
+
+  if (!articles.length) {
+    grid.innerHTML = `<div class="state-box"><div class="state-msg state-err">⚠ フィードの取得に失敗しました</div><div class="state-msg">ネットワーク接続を確認してください</div></div>`;
+    return;
+  }
+
+  buildTicker();
+  render();
+}
+
+/* ═══════════════════════════════════════════
+   TICKER
+═══════════════════════════════════════════ */
+function buildTicker() {
+  const items = articles.slice(0, 20);
+  const html = [...items, ...items].map(a =>
+    `<span class="ticker-item"><a href="${a.link}" target="_blank" rel="noopener">${a.title}</a></span>`
+  ).join('');
+  document.getElementById('tickerTape').innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════
+   RENDER
+═══════════════════════════════════════════ */
+function filtered() {
+  return articles.filter(a => {
+    const matchCat = activeCat === 'all' || a.cat === activeCat;
+    const matchQ   = !query || a.title.toLowerCase().includes(query) || strip(a.desc).toLowerCase().includes(query);
+    return matchCat && matchQ;
+  });
+}
+
+function render() {
+  const list = filtered();
+  document.getElementById('st-shown').textContent = list.length;
+  const grid = document.getElementById('grid');
+
+  if (!list.length) {
+    grid.innerHTML = `<div class="state-box"><div style="font-size:2rem">📡</div><div class="state-msg">該当する記事が見つかりませんでした</div></div>`;
+    return;
+  }
+
+  grid.innerHTML = list.map(cardHTML).join('');
+
+  // click → open article
+  grid.querySelectorAll('.card').forEach((el, i) => {
+    el.addEventListener('click', () => window.open(list[i].link, '_blank', 'noopener'));
+  });
+}
+
+function cardHTML(a) {
+  const bm    = bookmarks.has(a.link);
+  const excpt = strip(a.desc).slice(0, 110);
+  const safe  = a.link.replace(/"/g, '&quot;');
+
+  return `
+<div class="card c-${a.cat}">
+  <div class="cmeta">
+    <span class="source-tag"><span class="sdot"></span>${a.src}</span>
+    <span class="cat-tag t-${a.cat}">${CAT_LABEL[a.cat] || a.cat}</span>
+    <span class="tago">${ago(a.date)}</span>
+  </div>
+  <div class="ctitle">${a.title}</div>
+  ${excpt ? `<div class="cexcerpt">${excpt}…</div>` : ''}
+  <div class="cfooter">
+    <a class="read-btn" href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation()">記事を読む →</a>
+    <button class="bmark-btn ${bm?'on':''}" title="${bm?'ブックマーク解除':'ブックマーク'}"
+      onclick="event.stopPropagation(); toggleBM('${safe}', this);">${bm?'★':'☆'}</button>
+  </div>
+</div>`;
+}
+
+/* ═══════════════════════════════════════════
+   INTERACTIONS
+═══════════════════════════════════════════ */
+function setCat(cat, btn) {
+  activeCat = cat;
+  document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function toggleBM(link, btn) {
+  if (bookmarks.has(link)) {
+    bookmarks.delete(link); btn.classList.remove('on'); btn.textContent = '☆';
+  } else {
+    bookmarks.add(link); btn.classList.add('on'); btn.textContent = '★';
+  }
+  localStorage.setItem('np_bm', JSON.stringify([...bookmarks]));
+}
+
+document.getElementById('searchInput').addEventListener('input', e => {
+  query = e.target.value.toLowerCase().trim();
+  render();
+});
+
+// Auto-refresh every 5 minutes
+setInterval(loadAll, 5 * 60 * 1000);
+
+// Boot
+loadAll();
+</script>
+</body>
+</html>
