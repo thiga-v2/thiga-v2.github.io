@@ -334,47 +334,55 @@
 
 <script>
 /* ═══════════════════════════════════════════
-   CONFIG
+   データソース定義 (CORS不要のAPIのみ使用)
+   1. Hacker News Algolia API  - 直接アクセス可
+   2. Reddit JSON API          - 直接アクセス可
+   3. Dev.to API               - 直接アクセス可
 ═══════════════════════════════════════════ */
-const PROXIES = [
-  'https://api.rss2json.com/v1/api.json?count=15&rss_url=',
-  'https://feeds.keyhole.co/feed?rss_url=',
+
+const HN_SEARCHES = [
+  { q:'BGP OSPF routing switching VLAN firewall',      cat:'networking' },
+  { q:'network security vulnerability CVE exploit',    cat:'security'   },
+  { q:'AWS Azure GCP kubernetes cloud infrastructure', cat:'cloud'      },
+  { q:'SDN NFV SD-WAN network virtualization',         cat:'sdn'        },
+  { q:'Cisco Juniper Arista network hardware',         cat:'hardware'   },
 ];
 
-const SOURCES = [
-  { name:'Hacker News',           url:'https://news.ycombinator.com/rss',                         cat:'general'    },
-  { name:'Network World',         url:'https://www.networkworld.com/feed/index.rss',              cat:'networking' },
-  { name:'Packet Pushers',        url:'https://packetpushers.net/feed/',                          cat:'networking' },
-  { name:'SDxCentral',            url:'https://www.sdxcentral.com/feed/',                         cat:'sdn'        },
-  { name:'The Register',          url:'https://www.theregister.com/infrastructure/news/rss',     cat:'networking' },
-  { name:'Bleeping Computer',     url:'https://www.bleepingcomputer.com/feed/',                   cat:'security'   },
-  { name:'AWS Blog',              url:'https://aws.amazon.com/blogs/aws/feed/',                   cat:'cloud'      },
-  { name:'Dev.to',                url:'https://dev.to/feed/tag/networking',                       cat:'networking' },
+const REDDIT_SUBS = [
+  { sub:'networking',    cat:'networking' },
+  { sub:'netsec',        cat:'security'   },
+  { sub:'sysadmin',      cat:'networking' },
+  { sub:'aws',           cat:'cloud'      },
+  { sub:'devops',        cat:'cloud'      },
+  { sub:'kubernetes',    cat:'cloud'      },
+];
+
+const DEVTO_TAGS = [
+  { tag:'networking',  cat:'networking' },
+  { tag:'security',    cat:'security'   },
+  { tag:'cloud',       cat:'cloud'      },
+  { tag:'devops',      cat:'cloud'      },
 ];
 
 const KW = {
-  networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','ip ','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall','ネットワーク','ルーティング'],
-  security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack','セキュリティ','脆弱性'],
-  cloud:      ['cloud','aws','azure','gcp','kubernetes','k8s','docker','container','serverless','devops','クラウド'],
-  hardware:   ['hardware','chip','silicon','asic','fpga','processor','router hardware','switch hardware','ハードウェア'],
-  sdn:        ['sdn','nfv','openflow','sd-wan','nsx','network function','virtualization','overlay','intent-based'],
+  networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall'],
+  security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack'],
+  cloud:      ['cloud','aws','azure','gcp','kubernetes','k8s','docker','container','serverless','devops'],
+  hardware:   ['hardware','chip','silicon','asic','fpga','processor'],
+  sdn:        ['sdn','nfv','openflow','sd-wan','nsx','network function','virtualization','overlay'],
 };
 
 const CAT_LABEL = { networking:'ネットワーク', security:'セキュリティ', cloud:'クラウド', hardware:'ハードウェア', sdn:'SDN/NFV', general:'一般' };
 
-/* ═══════════════════════════════════════════
-   STATE
-═══════════════════════════════════════════ */
-let articles = [];
+/* ── State ── */
+let articles  = [];
 let activeCat = 'all';
-let query = '';
+let query     = '';
 let bookmarks = new Set(JSON.parse(localStorage.getItem('np_bm') || '[]'));
 
-/* ═══════════════════════════════════════════
-   HELPERS
-═══════════════════════════════════════════ */
-function classify(item, fallback) {
-  const txt = (item.title + ' ' + (item.description || '')).toLowerCase();
+/* ── Helpers ── */
+function classify(title, desc, fallback) {
+  const txt = (title + ' ' + desc).toLowerCase();
   for (const [cat, kws] of Object.entries(KW)) {
     if (kws.some(k => txt.includes(k))) return cat;
   }
@@ -383,68 +391,111 @@ function classify(item, fallback) {
 
 function ago(d) {
   const s = (Date.now() - new Date(d)) / 1000;
-  if (s < 60)    return 'たった今';
-  if (s < 3600)  return `${Math.floor(s/60)}分前`;
-  if (s < 86400) return `${Math.floor(s/3600)}時間前`;
-  if (s < 604800)return `${Math.floor(s/86400)}日前`;
+  if (s < 60)     return 'たった今';
+  if (s < 3600)   return `${Math.floor(s/60)}分前`;
+  if (s < 86400)  return `${Math.floor(s/3600)}時間前`;
+  if (s < 604800) return `${Math.floor(s/86400)}日前`;
   return new Date(d).toLocaleDateString('ja-JP');
 }
 
 function strip(html) {
   const d = document.createElement('div');
   d.innerHTML = html;
-  return (d.textContent || '').replace(/\s+/g,' ').trim();
+  return (d.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
 /* ═══════════════════════════════════════════
-   FETCH
+   FETCH - Hacker News (Algolia API)
 ═══════════════════════════════════════════ */
-async function fetchSource(src) {
-  let lastErr;
-  for (const proxy of PROXIES) {
-    try {
-      const url = proxy + encodeURIComponent(src.url);
-      const r = await fetch(url, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-      if (!d.items || d.items.length === 0) throw new Error('No items');
-      console.log(`✓ ${src.name} (${d.items.length} items)`);
-      return d.items.map(it => ({
-        title:      it.title || '',
-        link:       it.link || '',
-        desc:       it.description || it.summary || '',
-        date:       it.pubDate || it.published || new Date().toISOString(),
-        src:        src.name,
-        cat:        classify(it, src.cat),
-      })).filter(x => x.title && x.link);
-    } catch (e) {
-      lastErr = e;
-      console.warn(`✗ ${src.name}: ${e.message}`);
-    }
-  }
-  throw lastErr || new Error(`${src.name}: all proxies failed`);
+async function fetchHN({ q, cat }) {
+  const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&tags=story&hitsPerPage=15`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HN HTTP ${r.status}`);
+  const d = await r.json();
+  return (d.hits || [])
+    .filter(h => h.url && h.title)
+    .map(h => ({
+      title: h.title,
+      link:  h.url,
+      desc:  '',
+      date:  h.created_at,
+      src:   'Hacker News',
+      cat:   classify(h.title, '', cat),
+      score: h.points || 0,
+    }));
 }
 
+/* ═══════════════════════════════════════════
+   FETCH - Reddit
+═══════════════════════════════════════════ */
+async function fetchReddit({ sub, cat }) {
+  const url = `https://www.reddit.com/r/${sub}/top.json?limit=20&t=day`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`Reddit HTTP ${r.status}`);
+  const d = await r.json();
+  return (d.data?.children || [])
+    .map(c => c.data)
+    .filter(p => p.title && (p.url || p.permalink))
+    .map(p => ({
+      title: p.title,
+      link:  p.url?.startsWith('http') ? p.url : `https://reddit.com${p.permalink}`,
+      desc:  p.selftext || '',
+      date:  new Date(p.created_utc * 1000).toISOString(),
+      src:   `r/${sub}`,
+      cat:   classify(p.title, p.selftext || '', cat),
+      score: p.score || 0,
+    }));
+}
+
+/* ═══════════════════════════════════════════
+   FETCH - Dev.to
+═══════════════════════════════════════════ */
+async function fetchDevTo({ tag, cat }) {
+  const url = `https://dev.to/api/articles?tag=${tag}&per_page=15&top=7`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`Dev.to HTTP ${r.status}`);
+  const d = await r.json();
+  return d
+    .filter(a => a.title && a.url)
+    .map(a => ({
+      title: a.title,
+      link:  a.url,
+      desc:  a.description || '',
+      date:  a.published_at,
+      src:   'Dev.to',
+      cat:   classify(a.title, a.description || '', cat),
+      score: a.public_reactions_count || 0,
+    }));
+}
+
+/* ═══════════════════════════════════════════
+   LOAD ALL
+═══════════════════════════════════════════ */
 async function loadAll() {
   const grid = document.getElementById('grid');
   const btn  = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
-  grid.innerHTML = `<div class="state-box"><div class="spinner"></div><div class="state-msg">フィードを取得中 (${SOURCES.length} ソース)…</div></div>`;
-  articles = [];
-  console.clear();
-  console.log('🔄 Loading feeds...');
 
-  const results = await Promise.allSettled(SOURCES.map(fetchSource));
+  const total = HN_SEARCHES.length + REDDIT_SUBS.length + DEVTO_TAGS.length;
+  grid.innerHTML = `<div class="state-box"><div class="spinner"></div><div class="state-msg">ニュースを取得中… (${total} ソース)</div></div>`;
+  articles = [];
+
+  const tasks = [
+    ...HN_SEARCHES.map(s => fetchHN(s)),
+    ...REDDIT_SUBS.map(s => fetchReddit(s)),
+    ...DEVTO_TAGS.map(s => fetchDevTo(s)),
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  const seen = new Set();
   let ok = 0;
+
   for (const r of results) {
-    if (r.status === 'fulfilled') {
-      articles.push(...r.value);
+    if (r.status === 'fulfilled' && r.value.length > 0) {
+      for (const a of r.value) {
+        if (!seen.has(a.link)) { seen.add(a.link); articles.push(a); }
+      }
       ok++;
-    } else {
-      console.error('Feed error:', r.reason?.message);
     }
   }
 
@@ -460,23 +511,15 @@ async function loadAll() {
   btn.classList.remove('spinning');
 
   if (!articles.length) {
-    console.error('❌ No articles loaded');
-    grid.innerHTML = `
-    <div class="state-box">
-      <div class="state-msg state-err">⚠ フィードの取得に失敗しました</div>
-      <div class="state-msg" style="font-size:0.75rem; margin-top:1rem;">ブラウザの開発者ツール (F12) の Console タブを確認してください</div>
-    </div>`;
+    grid.innerHTML = `<div class="state-box"><div class="state-msg state-err">⚠ 記事を取得できませんでした</div><div class="state-msg" style="font-size:.75rem;margin-top:.5rem">ネットワーク接続を確認してください</div></div>`;
     return;
   }
 
-  console.log(`✅ Loaded ${articles.length} articles from ${ok} sources`);
   buildTicker();
   render();
 }
 
-/* ═══════════════════════════════════════════
-   TICKER
-═══════════════════════════════════════════ */
+/* ── Ticker ── */
 function buildTicker() {
   const items = articles.slice(0, 20);
   const html = [...items, ...items].map(a =>
@@ -485,13 +528,11 @@ function buildTicker() {
   document.getElementById('tickerTape').innerHTML = html;
 }
 
-/* ═══════════════════════════════════════════
-   RENDER
-═══════════════════════════════════════════ */
+/* ── Render ── */
 function filtered() {
   return articles.filter(a => {
     const matchCat = activeCat === 'all' || a.cat === activeCat;
-    const matchQ   = !query || a.title.toLowerCase().includes(query) || strip(a.desc).toLowerCase().includes(query);
+    const matchQ   = !query || a.title.toLowerCase().includes(query) || a.desc.toLowerCase().includes(query);
     return matchCat && matchQ;
   });
 }
@@ -507,8 +548,6 @@ function render() {
   }
 
   grid.innerHTML = list.map(cardHTML).join('');
-
-  // click → open article
   grid.querySelectorAll('.card').forEach((el, i) => {
     el.addEventListener('click', () => window.open(list[i].link, '_blank', 'noopener'));
   });
@@ -518,7 +557,6 @@ function cardHTML(a) {
   const bm    = bookmarks.has(a.link);
   const excpt = strip(a.desc).slice(0, 110);
   const safe  = a.link.replace(/"/g, '&quot;');
-
   return `
 <div class="card c-${a.cat}">
   <div class="cmeta">
@@ -531,14 +569,12 @@ function cardHTML(a) {
   <div class="cfooter">
     <a class="read-btn" href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation()">記事を読む →</a>
     <button class="bmark-btn ${bm?'on':''}" title="${bm?'ブックマーク解除':'ブックマーク'}"
-      onclick="event.stopPropagation(); toggleBM('${safe}', this);">${bm?'★':'☆'}</button>
+      onclick="event.stopPropagation();toggleBM('${safe}',this)">${bm?'★':'☆'}</button>
   </div>
 </div>`;
 }
 
-/* ═══════════════════════════════════════════
-   INTERACTIONS
-═══════════════════════════════════════════ */
+/* ── Interactions ── */
 function setCat(cat, btn) {
   activeCat = cat;
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
@@ -560,10 +596,7 @@ document.getElementById('searchInput').addEventListener('input', e => {
   render();
 });
 
-// Auto-refresh every 5 minutes
 setInterval(loadAll, 5 * 60 * 1000);
-
-// Boot
 loadAll();
 </script>
 </body>
