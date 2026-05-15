@@ -220,6 +220,38 @@
       cursor:pointer; font-size:.9rem; padding:.15rem; transition:color .18s;
     }
     .bmark-btn:hover, .bmark-btn.on { color: var(--orange); }
+    .trans-btn {
+      background:none; border:none; color: var(--text-muted);
+      cursor:pointer; font-size:.9rem; padding:.15rem; transition:color .18s;
+    }
+    .trans-btn:hover { color: var(--blue); }
+
+    .lang-flag { font-size:.75rem; }
+
+    /* ── Modal ── */
+    .modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+      background:rgba(0,0,0,.7); z-index:1000; align-items:center; justify-content:center; }
+    .modal.show { display:flex; }
+    .modal-box { background: var(--bg-card); border:1px solid var(--border);
+      border-radius:12px; padding:2rem; max-width:500px; max-height:80vh; overflow-y:auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,.6); animation:fade-up .3s ease-out; }
+    .modal-title { font-size:.8rem; color: var(--text-muted); font-family: var(--font-mono);
+      text-transform:uppercase; letter-spacing:.08em; margin-bottom:.75rem; }
+    .modal-text { font-size:.9rem; line-height:1.6; color: var(--text-primary);
+      margin-bottom:1.5rem; }
+    .modal-loading { text-align:center; color: var(--text-muted); }
+    .modal-spinner { width:24px; height:24px; border:2px solid var(--border);
+      border-top-color: var(--cyan); border-radius:50%; animation:spin .6s linear infinite;
+      margin:0 auto .5rem; }
+    .modal-close { position:absolute; top:1rem; right:1rem; background:none;
+      border:none; color: var(--text-muted); font-size:1.5rem; cursor:pointer;
+      transition:color .2s; }
+    .modal-close:hover { color: var(--text-primary); }
+    .modal-actions { display:flex; gap:.75rem; }
+    .modal-btn { flex:1; padding:.6rem; background: rgba(0,212,255,.1);
+      border:1px solid rgba(0,212,255,.25); color: var(--cyan); border-radius:6px;
+      cursor:pointer; font-size:.8rem; transition:all .2s; font-family: var(--font-mono); }
+    .modal-btn:hover { background: rgba(0,212,255,.2); border-color: var(--cyan); }
 
     /* Category accent colors */
     .c-networking { --accent: var(--cyan);   }
@@ -364,6 +396,13 @@ const DEVTO_TAGS = [
   { tag:'devops',      cat:'cloud'      },
 ];
 
+const JA_SOURCES = [
+  { type:'qiita', query:'network OR networking',          cat:'networking', lang:'ja' },
+  { type:'qiita', query:'security OR vulnerability',      cat:'security',   lang:'ja' },
+  { type:'qiita', query:'cloud OR AWS OR kubernetes',     cat:'cloud',      lang:'ja' },
+  { type:'hatena', cat:'general', lang:'ja' },
+];
+
 const KW = {
   networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall'],
   security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack'],
@@ -422,6 +461,7 @@ async function fetchHN({ q, cat }) {
       src:   'Hacker News',
       cat:   classify(h.title, '', cat),
       score: h.points || 0,
+      lang:  'en',
     }));
 }
 
@@ -444,6 +484,7 @@ async function fetchReddit({ sub, cat }) {
       src:   `r/${sub}`,
       cat:   classify(p.title, p.selftext || '', cat),
       score: p.score || 0,
+      lang:  'en',
     }));
 }
 
@@ -465,6 +506,52 @@ async function fetchDevTo({ tag, cat }) {
       src:   'Dev.to',
       cat:   classify(a.title, a.description || '', cat),
       score: a.public_reactions_count || 0,
+      lang:  'en',
+    }));
+}
+
+/* ═══════════════════════════════════════════
+   FETCH - Qiita (日本語)
+═══════════════════════════════════════════ */
+async function fetchQiita({ query, cat }) {
+  const url = `https://qiita.com/api/v2/items?query=${encodeURIComponent(query)}&per_page=20&sort=likes`;
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`Qiita HTTP ${r.status}`);
+  const d = await r.json();
+  return d
+    .filter(a => a.title && a.url)
+    .map(a => ({
+      title: a.title,
+      link:  a.url,
+      desc:  a.body?.slice(0, 200) || '',
+      date:  a.created_at,
+      src:   'Qiita',
+      cat:   classify(a.title, a.body || '', cat),
+      score: a.likes_count || 0,
+      lang:  'ja',
+    }));
+}
+
+/* ═══════════════════════════════════════════
+   FETCH - はてなブックマーク (日本語)
+═══════════════════════════════════════════ */
+async function fetchHatena() {
+  const url = `http://bookmark.hatena.ne.jp/api/hotentries.json?category=tech&sort=count`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Hatena HTTP ${r.status}`);
+  const d = await r.json();
+  return (d.hotentries || [])
+    .filter(e => e.title && e.url)
+    .slice(0, 15)
+    .map(e => ({
+      title: e.title,
+      link:  e.url,
+      desc:  e.description || '',
+      date:  new Date(e.timestamp).toISOString(),
+      src:   'はてなブックマーク',
+      cat:   classify(e.title, e.description || '', 'general'),
+      score: e.count || 0,
+      lang:  'ja',
     }));
 }
 
@@ -476,7 +563,7 @@ async function loadAll() {
   const btn  = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
 
-  const total = HN_SEARCHES.length + REDDIT_SUBS.length + DEVTO_TAGS.length;
+  const total = HN_SEARCHES.length + REDDIT_SUBS.length + DEVTO_TAGS.length + JA_SOURCES.length;
   grid.innerHTML = `<div class="state-box"><div class="spinner"></div><div class="state-msg">ニュースを取得中… (${total} ソース)</div></div>`;
   articles = [];
 
@@ -484,6 +571,7 @@ async function loadAll() {
     ...HN_SEARCHES.map(s => fetchHN(s)),
     ...REDDIT_SUBS.map(s => fetchReddit(s)),
     ...DEVTO_TAGS.map(s => fetchDevTo(s)),
+    ...JA_SOURCES.map(s => s.type === 'qiita' ? fetchQiita(s) : fetchHatena()),
   ];
 
   const results = await Promise.allSettled(tasks);
@@ -528,6 +616,29 @@ function buildTicker() {
   document.getElementById('tickerTape').innerHTML = html;
 }
 
+/* ═══════════════════════════════════════════
+   翻訳
+═══════════════════════════════════════════ */
+const translationCache = new Map();
+
+async function translate(text) {
+  if (translationCache.has(text)) return translationCache.get(text);
+
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=en|ja`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.responseStatus === 200) {
+      const result = d.responseData.translatedText;
+      translationCache.set(text, result);
+      return result;
+    }
+    throw new Error('Translation failed');
+  } catch (e) {
+    return null;
+  }
+}
+
 /* ── Render ── */
 function filtered() {
   return articles.filter(a => {
@@ -557,19 +668,26 @@ function cardHTML(a) {
   const bm    = bookmarks.has(a.link);
   const excpt = strip(a.desc).slice(0, 110);
   const safe  = a.link.replace(/"/g, '&quot;');
+  const langTag = a.lang === 'ja' ? '🇯🇵' : '🇬🇧';
+  const transBtn = a.lang === 'en' ? `<button class="trans-btn" onclick="event.stopPropagation();showTranslation('${safe.replace(/'/g, '\\'')}')" title="翻訳">📖</button>` : '';
+
   return `
 <div class="card c-${a.cat}">
   <div class="cmeta">
     <span class="source-tag"><span class="sdot"></span>${a.src}</span>
     <span class="cat-tag t-${a.cat}">${CAT_LABEL[a.cat] || a.cat}</span>
+    <span class="lang-flag">${langTag}</span>
     <span class="tago">${ago(a.date)}</span>
   </div>
   <div class="ctitle">${a.title}</div>
   ${excpt ? `<div class="cexcerpt">${excpt}…</div>` : ''}
   <div class="cfooter">
     <a class="read-btn" href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation()">記事を読む →</a>
-    <button class="bmark-btn ${bm?'on':''}" title="${bm?'ブックマーク解除':'ブックマーク'}"
-      onclick="event.stopPropagation();toggleBM('${safe}',this)">${bm?'★':'☆'}</button>
+    <div style="display:flex;gap:.3rem">
+      ${transBtn}
+      <button class="bmark-btn ${bm?'on':''}" title="${bm?'ブックマーク解除':'ブックマーク'}"
+        onclick="event.stopPropagation();toggleBM('${safe}',this)">${bm?'★':'☆'}</button>
+    </div>
   </div>
 </div>`;
 }
@@ -580,6 +698,61 @@ function setCat(cat, btn) {
   document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   render();
+}
+
+async function showTranslation(link) {
+  const article = articles.find(a => a.link === link);
+  if (!article) return;
+
+  let modal = document.getElementById('transModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'transModal';
+    modal.className = 'modal';
+    modal.onclick = (e) => e.target === modal && closeModal();
+    document.body.appendChild(modal);
+  }
+
+  const content = modal.querySelector('.modal-box') || (() => {
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+    modal.appendChild(box);
+    return box;
+  })();
+
+  content.innerHTML = `
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title">📖 翻訳</div>
+    <div class="modal-text">
+      <div style="margin-bottom:1.5rem">
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">原文（英語）</div>
+        <div style="font-weight:600">${article.title}</div>
+      </div>
+      <div id="transResult" class="modal-loading">
+        <div class="modal-spinner"></div>
+        <div>翻訳中…</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <a href="https://translate.google.com/translate?u=${encodeURIComponent(article.link)}" target="_blank" class="modal-btn">Google Translate</a>
+      <button class="modal-btn" onclick="closeModal()">閉じる</button>
+    </div>
+  `;
+
+  modal.classList.add('show');
+
+  const translated = await translate(article.title);
+  const resultEl = document.getElementById('transResult');
+  if (translated && translated !== article.title) {
+    resultEl.innerHTML = `<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">日本語訳</div><div style="font-weight:600;color:var(--accent-green)">${translated}</div>`;
+  } else {
+    resultEl.innerHTML = '<div style="color:var(--text-muted)">翻訳に失敗しました。Google Translate をお使いください。</div>';
+  }
+}
+
+function closeModal() {
+  const modal = document.getElementById('transModal');
+  if (modal) modal.classList.remove('show');
 }
 
 function toggleBM(link, btn) {
