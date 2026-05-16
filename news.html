@@ -365,49 +365,37 @@
 </main>
 
 <script>
-/* ═══════════════════════════════════════════
-   データソース定義 (CORS不要のAPIのみ使用)
-   1. Hacker News Algolia API  - 直接アクセス可
-   2. Reddit JSON API          - 直接アクセス可
-   3. Dev.to API               - 直接アクセス可
-═══════════════════════════════════════════ */
-
+/* ─────────────────────────────────────────
+   ソース設定
+   CORS対応・HTTPS確定のAPIのみ使用
+───────────────────────────────────────── */
 const HN_SEARCHES = [
-  { q:'BGP OSPF routing switching VLAN firewall',      cat:'networking' },
-  { q:'network security vulnerability CVE exploit',    cat:'security'   },
-  { q:'AWS Azure GCP kubernetes cloud infrastructure', cat:'cloud'      },
-  { q:'SDN NFV SD-WAN network virtualization',         cat:'sdn'        },
-  { q:'Cisco Juniper Arista network hardware',         cat:'hardware'   },
-];
-
-const REDDIT_SUBS = [
-  { sub:'networking',    cat:'networking' },
-  { sub:'netsec',        cat:'security'   },
-  { sub:'sysadmin',      cat:'networking' },
-  { sub:'aws',           cat:'cloud'      },
-  { sub:'devops',        cat:'cloud'      },
-  { sub:'kubernetes',    cat:'cloud'      },
+  { q:'BGP OSPF routing switching VLAN VPN firewall', cat:'networking' },
+  { q:'network security vulnerability CVE exploit',   cat:'security'   },
+  { q:'AWS Azure GCP kubernetes cloud',               cat:'cloud'      },
+  { q:'SDN NFV SD-WAN network virtualization',        cat:'sdn'        },
+  { q:'Cisco Juniper Arista hardware chip',           cat:'hardware'   },
 ];
 
 const DEVTO_TAGS = [
-  { tag:'networking',  cat:'networking' },
-  { tag:'security',    cat:'security'   },
-  { tag:'cloud',       cat:'cloud'      },
-  { tag:'devops',      cat:'cloud'      },
+  { tag:'networking', cat:'networking' },
+  { tag:'security',   cat:'security'   },
+  { tag:'cloud',      cat:'cloud'      },
+  { tag:'devops',     cat:'cloud'      },
 ];
 
-const JA_SOURCES = [
-  { type:'qiita', query:'network OR networking',          cat:'networking', lang:'ja' },
-  { type:'qiita', query:'security OR vulnerability',      cat:'security',   lang:'ja' },
-  { type:'qiita', query:'cloud OR AWS OR kubernetes',     cat:'cloud',      lang:'ja' },
-  { type:'hatena', cat:'general', lang:'ja' },
+const QIITA_QUERIES = [
+  { query:'BGP OSPF routing network',      cat:'networking' },
+  { query:'セキュリティ vulnerability',    cat:'security'   },
+  { query:'AWS kubernetes クラウド',       cat:'cloud'      },
+  { query:'SDN NFV ネットワーク仮想化',   cat:'sdn'        },
 ];
 
 const KW = {
-  networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall'],
-  security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack'],
-  cloud:      ['cloud','aws','azure','gcp','kubernetes','k8s','docker','container','serverless','devops'],
-  hardware:   ['hardware','chip','silicon','asic','fpga','processor'],
+  networking: ['network','routing','switching','bgp','ospf','vlan','wan','lan','ethernet','tcp','udp','subnet','cisco','juniper','arista','mpls','vpn','nat','dns','dhcp','firewall','ネットワーク','ルーティング'],
+  security:   ['security','vulnerability','exploit','malware','ransomware','breach','hack','phishing','ddos','zero-day','cve','patch','threat','attack','セキュリティ','脆弱性'],
+  cloud:      ['cloud','aws','azure','gcp','kubernetes','k8s','docker','container','serverless','devops','クラウド'],
+  hardware:   ['hardware','chip','silicon','asic','fpga','processor','ハードウェア'],
   sdn:        ['sdn','nfv','openflow','sd-wan','nsx','network function','virtualization','overlay'],
 };
 
@@ -418,10 +406,11 @@ let articles  = [];
 let activeCat = 'all';
 let query     = '';
 let bookmarks = new Set(JSON.parse(localStorage.getItem('np_bm') || '[]'));
+const tlCache = new Map();
 
 /* ── Helpers ── */
 function classify(title, desc, fallback) {
-  const txt = (title + ' ' + desc).toLowerCase();
+  const txt = (title + ' ' + (desc || '')).toLowerCase();
   for (const [cat, kws] of Object.entries(KW)) {
     if (kws.some(k => txt.includes(k))) return cat;
   }
@@ -429,7 +418,9 @@ function classify(title, desc, fallback) {
 }
 
 function ago(d) {
+  if (!d) return '日時不明';
   const s = (Date.now() - new Date(d)) / 1000;
+  if (isNaN(s) || s < 0) return '日時不明';
   if (s < 60)     return 'たった今';
   if (s < 3600)   return `${Math.floor(s/60)}分前`;
   if (s < 86400)  return `${Math.floor(s/3600)}時間前`;
@@ -439,149 +430,92 @@ function ago(d) {
 
 function strip(html) {
   const d = document.createElement('div');
-  d.innerHTML = html;
+  d.innerHTML = html || '';
   return (d.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
-/* ═══════════════════════════════════════════
-   FETCH - Hacker News (Algolia API)
-═══════════════════════════════════════════ */
+/* ── fetch with timeout ── */
+async function fetchWithTimeout(url, opts = {}, ms = 10000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    return r;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/* ─────────────────────────────────────────
+   FETCH - Hacker News (Algolia Search API)
+───────────────────────────────────────── */
 async function fetchHN({ q, cat }) {
   const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(q)}&tags=story&hitsPerPage=15`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HN HTTP ${r.status}`);
+  const r = await fetchWithTimeout(url);
+  if (!r.ok) throw new Error(`HN ${r.status}`);
   const d = await r.json();
-  return (d.hits || [])
-    .filter(h => h.url && h.title)
-    .map(h => ({
-      title: h.title,
-      link:  h.url,
-      desc:  '',
-      date:  h.created_at,
-      src:   'Hacker News',
-      cat:   classify(h.title, '', cat),
-      score: h.points || 0,
-      lang:  'en',
-    }));
+  return (d.hits || []).filter(h => h.url && h.title).map(h => ({
+    title: h.title, link: h.url, desc: '',
+    date: h.created_at, src: 'Hacker News',
+    cat: classify(h.title, '', cat), lang: 'en',
+  }));
 }
 
-/* ═══════════════════════════════════════════
-   FETCH - Reddit
-═══════════════════════════════════════════ */
-async function fetchReddit({ sub, cat }) {
-  const url = `https://www.reddit.com/r/${sub}/top.json?limit=20&t=day`;
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error(`Reddit HTTP ${r.status}`);
-  const d = await r.json();
-  return (d.data?.children || [])
-    .map(c => c.data)
-    .filter(p => p.title && (p.url || p.permalink))
-    .map(p => ({
-      title: p.title,
-      link:  p.url?.startsWith('http') ? p.url : `https://reddit.com${p.permalink}`,
-      desc:  p.selftext || '',
-      date:  new Date(p.created_utc * 1000).toISOString(),
-      src:   `r/${sub}`,
-      cat:   classify(p.title, p.selftext || '', cat),
-      score: p.score || 0,
-      lang:  'en',
-    }));
-}
-
-/* ═══════════════════════════════════════════
+/* ─────────────────────────────────────────
    FETCH - Dev.to
-═══════════════════════════════════════════ */
+───────────────────────────────────────── */
 async function fetchDevTo({ tag, cat }) {
   const url = `https://dev.to/api/articles?tag=${tag}&per_page=15&top=7`;
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error(`Dev.to HTTP ${r.status}`);
+  const r = await fetchWithTimeout(url);
+  if (!r.ok) throw new Error(`Dev.to ${r.status}`);
   const d = await r.json();
-  return d
-    .filter(a => a.title && a.url)
-    .map(a => ({
-      title: a.title,
-      link:  a.url,
-      desc:  a.description || '',
-      date:  a.published_at,
-      src:   'Dev.to',
-      cat:   classify(a.title, a.description || '', cat),
-      score: a.public_reactions_count || 0,
-      lang:  'en',
-    }));
+  return d.filter(a => a.title && a.url).map(a => ({
+    title: a.title, link: a.url, desc: a.description || '',
+    date: a.published_at, src: 'Dev.to',
+    cat: classify(a.title, a.description || '', cat), lang: 'en',
+  }));
 }
 
-/* ═══════════════════════════════════════════
+/* ─────────────────────────────────────────
    FETCH - Qiita (日本語)
-═══════════════════════════════════════════ */
+───────────────────────────────────────── */
 async function fetchQiita({ query, cat }) {
-  const url = `https://qiita.com/api/v2/items?query=${encodeURIComponent(query)}&per_page=20&sort=likes`;
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  if (!r.ok) throw new Error(`Qiita HTTP ${r.status}`);
+  const url = `https://qiita.com/api/v2/items?query=${encodeURIComponent(query)}&per_page=15`;
+  const r = await fetchWithTimeout(url);
+  if (!r.ok) throw new Error(`Qiita ${r.status}`);
   const d = await r.json();
-  return d
-    .filter(a => a.title && a.url)
-    .map(a => ({
-      title: a.title,
-      link:  a.url,
-      desc:  a.body?.slice(0, 200) || '',
-      date:  a.created_at,
-      src:   'Qiita',
-      cat:   classify(a.title, a.body || '', cat),
-      score: a.likes_count || 0,
-      lang:  'ja',
-    }));
+  if (!Array.isArray(d)) throw new Error('Qiita: invalid response');
+  return d.filter(a => a.title && a.url).map(a => ({
+    title: a.title, link: a.url, desc: strip(a.rendered_body || '').slice(0, 150),
+    date: a.created_at, src: 'Qiita',
+    cat: classify(a.title, a.body || '', cat), lang: 'ja',
+  }));
 }
 
-/* ═══════════════════════════════════════════
-   FETCH - はてなブックマーク (日本語)
-═══════════════════════════════════════════ */
-async function fetchHatena() {
-  const url = `http://bookmark.hatena.ne.jp/api/hotentries.json?category=tech&sort=count`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Hatena HTTP ${r.status}`);
-  const d = await r.json();
-  return (d.hotentries || [])
-    .filter(e => e.title && e.url)
-    .slice(0, 15)
-    .map(e => ({
-      title: e.title,
-      link:  e.url,
-      desc:  e.description || '',
-      date:  new Date(e.timestamp).toISOString(),
-      src:   'はてなブックマーク',
-      cat:   classify(e.title, e.description || '', 'general'),
-      score: e.count || 0,
-      lang:  'ja',
-    }));
-}
-
-/* ═══════════════════════════════════════════
+/* ─────────────────────────────────────────
    LOAD ALL
-═══════════════════════════════════════════ */
+───────────────────────────────────────── */
 async function loadAll() {
   const grid = document.getElementById('grid');
   const btn  = document.getElementById('refreshBtn');
   btn.classList.add('spinning');
 
-  const total = HN_SEARCHES.length + REDDIT_SUBS.length + DEVTO_TAGS.length + JA_SOURCES.length;
+  const total = HN_SEARCHES.length + DEVTO_TAGS.length + QIITA_QUERIES.length;
   grid.innerHTML = `<div class="state-box"><div class="spinner"></div><div class="state-msg">ニュースを取得中… (${total} ソース)</div></div>`;
   articles = [];
 
-  const tasks = [
-    ...HN_SEARCHES.map(s => fetchHN(s)),
-    ...REDDIT_SUBS.map(s => fetchReddit(s)),
-    ...DEVTO_TAGS.map(s => fetchDevTo(s)),
-    ...JA_SOURCES.map(s => s.type === 'qiita' ? fetchQiita(s) : fetchHatena()),
-  ];
+  const results = await Promise.allSettled([
+    ...HN_SEARCHES.map(fetchHN),
+    ...DEVTO_TAGS.map(fetchDevTo),
+    ...QIITA_QUERIES.map(fetchQiita),
+  ]);
 
-  const results = await Promise.allSettled(tasks);
   const seen = new Set();
   let ok = 0;
-
   for (const r of results) {
-    if (r.status === 'fulfilled' && r.value.length > 0) {
+    if (r.status === 'fulfilled' && r.value?.length > 0) {
       for (const a of r.value) {
-        if (!seen.has(a.link)) { seen.add(a.link); articles.push(a); }
+        if (a.link && !seen.has(a.link)) { seen.add(a.link); articles.push(a); }
       }
       ok++;
     }
@@ -590,12 +524,11 @@ async function loadAll() {
   articles.sort((a, b) => new Date(b.date) - new Date(a.date));
 
   const now = new Date();
-  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-  document.getElementById('st-total').textContent  = articles.length;
-  document.getElementById('st-src').textContent    = ok;
-  document.getElementById('st-time').textContent   = ts;
+  const ts  = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  document.getElementById('st-total').textContent = articles.length;
+  document.getElementById('st-src').textContent   = ok;
+  document.getElementById('st-time').textContent  = ts;
   document.getElementById('lastUpdated').textContent = `最終更新 ${ts}`;
-
   btn.classList.remove('spinning');
 
   if (!articles.length) {
@@ -610,36 +543,13 @@ async function loadAll() {
 /* ── Ticker ── */
 function buildTicker() {
   const items = articles.slice(0, 20);
-  const html = [...items, ...items].map(a =>
+  const html  = [...items, ...items].map(a =>
     `<span class="ticker-item"><a href="${a.link}" target="_blank" rel="noopener">${a.title}</a></span>`
   ).join('');
   document.getElementById('tickerTape').innerHTML = html;
 }
 
-/* ═══════════════════════════════════════════
-   翻訳
-═══════════════════════════════════════════ */
-const translationCache = new Map();
-
-async function translate(text) {
-  if (translationCache.has(text)) return translationCache.get(text);
-
-  try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=en|ja`;
-    const r = await fetch(url);
-    const d = await r.json();
-    if (d.responseStatus === 200) {
-      const result = d.responseData.translatedText;
-      translationCache.set(text, result);
-      return result;
-    }
-    throw new Error('Translation failed');
-  } catch (e) {
-    return null;
-  }
-}
-
-/* ── Render ── */
+/* ── Filter / Render ── */
 function filtered() {
   return articles.filter(a => {
     const matchCat = activeCat === 'all' || a.cat === activeCat;
@@ -658,39 +568,117 @@ function render() {
     return;
   }
 
-  grid.innerHTML = list.map(cardHTML).join('');
+  grid.innerHTML = list.map((a, i) => cardHTML(a, i)).join('');
+
+  /* カードクリック → 記事を開く */
   grid.querySelectorAll('.card').forEach((el, i) => {
     el.addEventListener('click', () => window.open(list[i].link, '_blank', 'noopener'));
   });
+
+  /* 翻訳ボタン（data-idx 経由でURLエスケープ問題を回避） */
+  grid.querySelectorAll('.trans-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      showTranslation(list[parseInt(btn.dataset.idx)]);
+    });
+  });
 }
 
-function cardHTML(a) {
-  const bm    = bookmarks.has(a.link);
-  const excpt = strip(a.desc).slice(0, 110);
-  const safe  = a.link.replace(/"/g, '&quot;');
-  const langTag = a.lang === 'ja' ? '🇯🇵' : '🇬🇧';
-  const transBtn = a.lang === 'en' ? `<button class="trans-btn" onclick="event.stopPropagation();showTranslation('${safe.replace(/'/g, '\\'')}')" title="翻訳">📖</button>` : '';
+function cardHTML(a, idx) {
+  const bm     = bookmarks.has(a.link);
+  const excpt  = a.desc ? strip(a.desc).slice(0, 110) : '';
+  const flag   = a.lang === 'ja' ? '🇯🇵' : '🇬🇧';
+  const trans  = a.lang === 'en' ? `<button class="trans-btn" data-idx="${idx}" title="日本語に翻訳">📖</button>` : '';
+  const safeHref = a.link.replace(/"/g, '&quot;');
 
   return `
 <div class="card c-${a.cat}">
   <div class="cmeta">
     <span class="source-tag"><span class="sdot"></span>${a.src}</span>
     <span class="cat-tag t-${a.cat}">${CAT_LABEL[a.cat] || a.cat}</span>
-    <span class="lang-flag">${langTag}</span>
+    <span class="lang-flag">${flag}</span>
     <span class="tago">${ago(a.date)}</span>
   </div>
   <div class="ctitle">${a.title}</div>
   ${excpt ? `<div class="cexcerpt">${excpt}…</div>` : ''}
   <div class="cfooter">
-    <a class="read-btn" href="${safe}" target="_blank" rel="noopener" onclick="event.stopPropagation()">記事を読む →</a>
-    <div style="display:flex;gap:.3rem">
-      ${transBtn}
+    <a class="read-btn" href="${safeHref}" target="_blank" rel="noopener" onclick="event.stopPropagation()">記事を読む →</a>
+    <div style="display:flex;gap:.3rem;align-items:center">
+      ${trans}
       <button class="bmark-btn ${bm?'on':''}" title="${bm?'ブックマーク解除':'ブックマーク'}"
-        onclick="event.stopPropagation();toggleBM('${safe}',this)">${bm?'★':'☆'}</button>
+        onclick="event.stopPropagation();toggleBM(this)"
+        data-link="${safeHref}">${bm?'★':'☆'}</button>
     </div>
   </div>
 </div>`;
 }
+
+/* ─────────────────────────────────────────
+   翻訳モーダル
+───────────────────────────────────────── */
+async function translate(text) {
+  if (tlCache.has(text)) return tlCache.get(text);
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0,500))}&langpair=en|ja`;
+    const r = await fetchWithTimeout(url, {}, 8000);
+    const d = await r.json();
+    if (d.responseStatus === 200) {
+      const t = d.responseData.translatedText;
+      tlCache.set(text, t);
+      return t;
+    }
+  } catch {}
+  return null;
+}
+
+function showTranslation(article) {
+  if (!article) return;
+  let modal = document.getElementById('transModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'transModal';
+    modal.className = 'modal';
+    modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="modal-title">📖 日本語翻訳</div>
+      <div class="modal-text">
+        <div style="margin-bottom:1.25rem">
+          <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">原文（英語）</div>
+          <div style="font-weight:600;line-height:1.5">${article.title}</div>
+        </div>
+        <div id="transResult">
+          <div class="modal-loading"><div class="modal-spinner"></div><div>翻訳中…</div></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <a href="https://translate.google.com/translate?u=${encodeURIComponent(article.link)}" target="_blank" rel="noopener" class="modal-btn">ページ全体を翻訳</a>
+        <button class="modal-btn" onclick="closeModal()">閉じる</button>
+      </div>
+    </div>`;
+
+  modal.classList.add('show');
+
+  translate(article.title).then(t => {
+    const el = document.getElementById('transResult');
+    if (!el) return;
+    el.innerHTML = t
+      ? `<div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.35rem">日本語訳</div>
+         <div style="font-weight:600;color:var(--green);line-height:1.5">${t}</div>`
+      : `<div style="color:var(--text-muted)">翻訳に失敗しました。「ページ全体を翻訳」をお試しください。</div>`;
+  });
+}
+
+function closeModal() {
+  const m = document.getElementById('transModal');
+  if (m) m.classList.remove('show');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 /* ── Interactions ── */
 function setCat(cat, btn) {
@@ -700,62 +688,8 @@ function setCat(cat, btn) {
   render();
 }
 
-async function showTranslation(link) {
-  const article = articles.find(a => a.link === link);
-  if (!article) return;
-
-  let modal = document.getElementById('transModal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'transModal';
-    modal.className = 'modal';
-    modal.onclick = (e) => e.target === modal && closeModal();
-    document.body.appendChild(modal);
-  }
-
-  const content = modal.querySelector('.modal-box') || (() => {
-    const box = document.createElement('div');
-    box.className = 'modal-box';
-    modal.appendChild(box);
-    return box;
-  })();
-
-  content.innerHTML = `
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="modal-title">📖 翻訳</div>
-    <div class="modal-text">
-      <div style="margin-bottom:1.5rem">
-        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">原文（英語）</div>
-        <div style="font-weight:600">${article.title}</div>
-      </div>
-      <div id="transResult" class="modal-loading">
-        <div class="modal-spinner"></div>
-        <div>翻訳中…</div>
-      </div>
-    </div>
-    <div class="modal-actions">
-      <a href="https://translate.google.com/translate?u=${encodeURIComponent(article.link)}" target="_blank" class="modal-btn">Google Translate</a>
-      <button class="modal-btn" onclick="closeModal()">閉じる</button>
-    </div>
-  `;
-
-  modal.classList.add('show');
-
-  const translated = await translate(article.title);
-  const resultEl = document.getElementById('transResult');
-  if (translated && translated !== article.title) {
-    resultEl.innerHTML = `<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.3rem">日本語訳</div><div style="font-weight:600;color:var(--accent-green)">${translated}</div>`;
-  } else {
-    resultEl.innerHTML = '<div style="color:var(--text-muted)">翻訳に失敗しました。Google Translate をお使いください。</div>';
-  }
-}
-
-function closeModal() {
-  const modal = document.getElementById('transModal');
-  if (modal) modal.classList.remove('show');
-}
-
-function toggleBM(link, btn) {
+function toggleBM(btn) {
+  const link = btn.dataset.link;
   if (bookmarks.has(link)) {
     bookmarks.delete(link); btn.classList.remove('on'); btn.textContent = '☆';
   } else {
